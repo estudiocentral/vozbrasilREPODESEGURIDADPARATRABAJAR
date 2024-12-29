@@ -78,7 +78,7 @@ class _RadioHomeState extends State<RadioHome> with WidgetsBindingObserver {
   bool _isConnectionGood = true; // Estado de la conexión a Internet
 
 
-  // Constantes
+  // Constantes constantes
   static const String streamUrl = 'https://s10.maxcast.com.br:9083/live';
   static const String logoAsset = 'assets/iconolavoz.png';
 
