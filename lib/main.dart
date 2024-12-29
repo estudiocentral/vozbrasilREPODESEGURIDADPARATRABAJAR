@@ -15,7 +15,7 @@ void main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
 
-  // Inicializar audio en background
+  // Inicializar audio en background ok
   try {
     await Future.wait([
       JustAudioBackground.init(
