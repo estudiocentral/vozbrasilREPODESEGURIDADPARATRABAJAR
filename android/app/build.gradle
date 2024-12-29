@@ -1,0 +1,69 @@
+plugins {
+    id "com.android.application"
+    id "kotlin-android"
+    // El Flutter Gradle Plugin debe aplicarse después de los plugins de Android y Kotlin.
+    id "dev.flutter.flutter-gradle-plugin"
+}
+
+def localProperties = new Properties()
+def localPropertiesFile = rootProject.file("local.properties")
+if (localPropertiesFile.exists()) {
+    localPropertiesFile.withReader("UTF-8") { reader ->
+        localProperties.load(reader)
+    }
+}
+
+// Cargar las propiedades de Flutter
+def flutterVersionCode = localProperties.getProperty("flutter.versionCode")
+if (flutterVersionCode == null) {
+    flutterVersionCode = "1" // Valor predeterminado si no se encuentra en local.properties
+}
+
+def flutterVersionName = localProperties.getProperty("flutter.versionName")
+if (flutterVersionName == null) {
+    flutterVersionName = "1.0" // Valor predeterminado si no se encuentra en local.properties
+}
+
+android {
+    compileSdkVersion 34
+
+    defaultConfig {
+        applicationId "com.kym.lavozdelacuradivina.radio"
+        minSdkVersion 21
+        targetSdkVersion 34
+        versionCode flutterVersionCode.toInteger() // Utiliza la versión de Flutter
+        versionName flutterVersionName // Utiliza el nombre de versión de Flutter
+    }
+
+    signingConfigs {
+        release {
+            storeFile file("/home/user/myapp/upload-keystore.jks") // Asegúrate de que esta ruta sea correcta
+            storePassword "453691450"
+            keyAlias "kennycar"
+            keyPassword "453691450" 
+        }
+    }
+
+    buildTypes {
+        release {
+            minifyEnabled false // Desactivar para evitar errores durante la compilación
+            shrinkResources false // Desactivar también
+            signingConfig signingConfigs.release // Especificamos la configuración de firma 'release'
+        }
+    }
+
+    // Configurar la compatibilidad con Java 17
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17 // Establecer la compatibilidad con Java 17
+        targetCompatibility JavaVersion.VERSION_17 // Asegurarse de que Java 17 se use
+    }
+
+    // Configuración de Kotlin para usar Java 17
+    kotlinOptions {
+        jvmTarget = "17" // Establecer el objetivo de JVM de Kotlin a 17
+    }
+}
+
+flutter {
+    source = "../.." // Ruta hacia el código fuente de Flutter (ajustar si es necesario)
+}
