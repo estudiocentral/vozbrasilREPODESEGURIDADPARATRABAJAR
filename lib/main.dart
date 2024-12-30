@@ -161,11 +161,14 @@ class _RadioHomeState extends State<RadioHome> with WidgetsBindingObserver {
   @override
   void dispose() {
     _timer?.cancel();
+    _audioPlayer.stop(); // Detener la reproducción de audio
     _audioPlayer.dispose();
     WidgetsBinding.instance.removeObserver(this);
     _processingStateSubscription?.cancel();
     _playerStateSubscription?.cancel();
     _connectivitySubscription?.cancel();
+    // JustAudioBackground.clearQueue(); // No es necesario, se detiene con _audioPlayer.stop()
+
     super.dispose();
   }
 
@@ -551,7 +554,7 @@ class _RadioHomeState extends State<RadioHome> with WidgetsBindingObserver {
                               ),
                               child: FloatingActionButton(
                                 onPressed: _playOrStopStream,                                
-                                backgroundColor: _isDarkMode ? null : const Color.fromARGB(255, 255, 255, 255),
+                                backgroundColor: _isDarkMode ? null : const Color.fromARGB(255, 220, 237, 242),
                                 foregroundColor: const Color(0xFF00FFFF), // Cian para el icono en modo oscuro
                                 child: Icon(_audioPlayer.playerState.playing ? Icons.stop : Icons.play_arrow, color: Colors.black, size: 52),
                                 shape: const CircleBorder(side: BorderSide(color: Color.fromARGB(255, 255, 255, 255), width: 1.5)),
