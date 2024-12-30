@@ -37,7 +37,7 @@ android {
 
     signingConfigs {
         release {
-            storeFile file("/home/user/myapp/upload-keystore.jks") // Asegúrate de que esta ruta sea correcta
+            storeFile file("/home/user/A-VOZ-DA-CURA-DIVINA-BR-/upload-keystore.jks") 
             storePassword "453691450"
             keyAlias "kennycar"
             keyPassword "453691450" 

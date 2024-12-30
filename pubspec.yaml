@@ -1,7 +1,7 @@
 
 name: la_voz_de_la_cura_divina
 description: Una aplicación de radio para La Voz de la Cura Divina.
-version: 1.0.0+42
+version: 1.0.0+43
 environment:
   sdk: ">=2.19.0 <3.0.0"
 

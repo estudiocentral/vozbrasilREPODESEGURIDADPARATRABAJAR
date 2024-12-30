@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:just_audio/just_audio.dart';
 import 'package:url_launcher/url_launcher.dart';
@@ -7,9 +8,11 @@ import 'package:just_audio_background/just_audio_background.dart';
 import 'package:audio_session/audio_session.dart';
 import 'package:connectivity_plus/connectivity_plus.dart'; // Nuevo paquete para verificar conexión
 import 'package:share_plus/share_plus.dart'; // Nuevo paquete para compartir
-import 'package:loading_animation_widget/loading_animation_widget.dart'; // Nuevo paquete para el loader
-import 'package:flutter_spinkit/flutter_spinkit.dart'; // Nuevo paquete para la animación Ripple
 
+// Streams para la gestión de audio y conexión.
+StreamSubscription<ProcessingState>? _processingStateSubscription;
+StreamSubscription<PlayerState>? _playerStateSubscription;
+StreamSubscription<List<ConnectivityResult>>? _connectivitySubscription; 
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -52,6 +55,16 @@ class MyApp extends StatelessWidget {
       theme: ThemeData(
         brightness: Brightness.light,
         primaryColor: Colors.grey[200],
+        floatingActionButtonTheme: const FloatingActionButtonThemeData(
+          splashColor: Color.fromARGB(255, 173, 173, 230), // Azul bebé para el splash
+        ),
+      ),
+      darkTheme: ThemeData.dark().copyWith(
+        floatingActionButtonTheme: const FloatingActionButtonThemeData(
+          backgroundColor: Color(0xFF00FFFF), // Cian para el fondo en modo oscuro
+          elevation: 6, // Sin elevación en modo oscuro
+          // foregroundColor: Color(0xFF00FFFF), // Cian para el icono en modo oscuro (Comentado para evitar conflictos)
+        ),
       ),
       home: const RadioHome(),
     );
@@ -72,24 +85,28 @@ class _RadioHomeState extends State<RadioHome> with WidgetsBindingObserver {
   final AudioPlayer _audioPlayer = AudioPlayer();
   bool _isDarkMode = false; // Nuevo estado para el modo oscuro
   bool _isInitialLoading = true; // Nuevo estado para la carga inicial
-  bool _isLoading = false; // Nuevo estado para el cargador
   String _errorMessage = '';
   double _volume = 1.0; // Control de volumen
   bool _isConnectionGood = true; // Estado de la conexión a Internet
+  Timer? _timer; // Timer para controlar el loader
 
+  // Método auxiliar para manejar errores
+  void _handleError(String message, {bool showSnackBar = true}) {
+    debugPrint(message);
+    if (mounted) {
+      setState(() {
+        _errorMessage = message;
+      });
+      if (showSnackBar) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(message), duration: const Duration(seconds: 2)));
+      }
+    }
+  }
 
   // Constantes constantes
   static const String streamUrl = 'https://s10.maxcast.com.br:9083/live';
-  static const String logoAsset = 'assets/iconolavoz.png';
 
 
-  @override
-  void initState() {
-    super.initState();
-    WidgetsBinding.instance.addObserver(this);
-    _initializePlayer();
-    _checkInternetConnection(); // Verificar conexión al iniciar
-  }
 
 
   Future<void> _initializePlayer() async {
@@ -99,13 +116,7 @@ class _RadioHomeState extends State<RadioHome> with WidgetsBindingObserver {
         _initializeAudio(),
       ]);
     } catch (e) {
-      debugPrint("Error inicializando el player: $e");
-      if (mounted) {
-        setState(() {
-          _errorMessage = 'Error al inicializar el reproductor: ${e.toString()}';
-          _isInitialLoading = false;
-        });
-      }
+      _handleError('Error al inicializar el reproductor: $e');
     } finally {
       if (mounted) {
         setState(() {
@@ -117,23 +128,44 @@ class _RadioHomeState extends State<RadioHome> with WidgetsBindingObserver {
 
 
   Future<void> _setupPlayerListeners() async {
-    _audioPlayer.processingStateStream.listen((state) {
-      if (mounted) {
-        setState(() {
-          _isLoading = state == ProcessingState.buffering; // Actualiza el estado del cargador
-        });
-      }
+    _processingStateSubscription = _audioPlayer.processingStateStream.listen((state) {
+      debugPrint('ProcessingStateStream: $state');
       if (state == ProcessingState.completed) {
         _restartStream();
       }
     });
+
+    _playerStateSubscription = _audioPlayer.playerStateStream.listen((state) {
+      debugPrint('PlayerStateStream: $state');
+      if (mounted) {
+        setState(() {}); // Actualizar la interfaz cuando el estado del reproductor cambia
+      }
+    });
+
+    _connectivitySubscription = Connectivity()
+        .onConnectivityChanged
+        .listen((List<ConnectivityResult> result) {
+      _checkInternetConnection();
+    }); 
   }
+
+  @override
+  void initState() {
+    super.initState();
+    _initializePlayer();
+    _checkInternetConnection(); // Verificar conexión al iniciar
+    _audioPlayer.playerStateStream.listen((state) => debugPrint("PlayerStateStream: $state"));    
+  } 
 
 
   @override
   void dispose() {
+    _timer?.cancel();
     _audioPlayer.dispose();
     WidgetsBinding.instance.removeObserver(this);
+    _processingStateSubscription?.cancel();
+    _playerStateSubscription?.cancel();
+    _connectivitySubscription?.cancel();
     super.dispose();
   }
 
@@ -141,8 +173,9 @@ class _RadioHomeState extends State<RadioHome> with WidgetsBindingObserver {
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state == AppLifecycleState.resumed &&
-        _audioPlayer.playerState.playing &&
+        !_audioPlayer.playerState.playing &&
         _audioPlayer.processingState == ProcessingState.idle) {
+      debugPrint("didChangeAppLifecycleState: reiniciando stream");
       _restartStream();
     }
   }
@@ -168,96 +201,70 @@ class _RadioHomeState extends State<RadioHome> with WidgetsBindingObserver {
       await _audioPlayer.setAudioSource(
         AudioSource.uri(
           Uri.parse(streamUrl),
-          tag: mediaItem,
+          tag: mediaItem,          
         ),
-        preload: false,
+        preload: true, // Activar la precarga
       );
     } catch (e) {
-      debugPrint("Error en la inicialización del audio: $e");
-      if (mounted) {
-        setState(() {
-          _errorMessage = 'Error al inicializar el audio: ${e.toString()}';
-        });
-      }
+      _handleError('Error al inicializar el audio: $e');
     }
   }
 
-
   Future<void> _restartStream() async {
+    debugPrint("Entrando en _restartStream");
     try {
-      await checkInternetConnection(); // Verifica la conexión antes de reiniciar
+      await _checkInternetConnection(); // Verifica la conexión antes de reiniciar
       await _audioPlayer.stop();
       await _initializeAudio();
-      if (_audioPlayer.playerState.playing) {
-        setState(() { _isLoading = true; }); // Mostrar el inkDrop antes de iniciar la reproducción
-        await _audioPlayer.play();
+
+      // Iniciar la reproducción después de reiniciar el stream
+      if (!_audioPlayer.playerState.playing) {
+        // await _playOrStopStream(); // Eliminar la reproducción automática si es necesario
       }
     } catch (e) {
       debugPrint("Error al reiniciar el stream: $e");
     }
+    debugPrint("Saliendo de _restartStream");
   }
 
 
   Future<void> _playOrStopStream() async {
-    try {
-      if (_audioPlayer.playerState.playing) {
+    debugPrint("Entrando en _playOrStopStream");
+    debugPrint("_audioPlayer.playerState.playing: ${_audioPlayer.playerState.playing}");
+
+    try {  
+      if (_audioPlayer.playerState.playing) { 
+        debugPrint("Deteniendo la reproducción");
         await _audioPlayer.stop();
-        setState(() {
-          _isLoading = false; // Asegurarse que isLoading se actualiza a false al hacer stop
-        });
-      } else {
-        if (_audioPlayer.processingState == ProcessingState.idle) {
-          await _initializeAudio();
+        if (mounted) {
+          setState(() {});
         }
 
-
-        // Mostrar el inkDrop inmediatamente en el hilo principal
-        setState(() {
-          _isLoading = true;
-        });
-
+      } else {
+        if (_audioPlayer.processingState == ProcessingState.idle) { 
+          await _initializeAudio();
+        }       
 
         await _audioPlayer.play();
-
-
-        if (_isConnectionGood) {
-          Future.delayed(const Duration(seconds: 2), () {
-            if (mounted) {
-              setState(() {
-                _isLoading = false; // Ocultar InkDrop después de 2 segundos
-              });
-            }
-          });
-        }
+        if (mounted) setState(() {});
       }
-
-
     } catch (e) {
-      debugPrint("Error al reproducir/detener el stream: $e");
-      if (mounted) {
-        setState(() {
-          _isLoading = false;  // Asegurar que el loading se detiene en caso de error
-          _errorMessage = 'Error en la reproducción';
-        });
-      }
+      debugPrint("Error en _playOrStopStream: $e");
+      _handleError('Error en la reproducción: $e');
     }
+    debugPrint("Saliendo de _playOrStopStream");
   }
 
-
+  // Método unificado para verificar la conexión a Internet
   Future<void> _checkInternetConnection() async {
-    final connectivityResult = await Connectivity().checkConnectivity();
-    setState(() {
-      _isConnectionGood = connectivityResult != ConnectivityResult.none;
-    });
-  }
-
-
-  Future<void> checkInternetConnection() async {
     final connectivityResult = await Connectivity().checkConnectivity();
     if (connectivityResult == ConnectivityResult.none) {
       setState(() {
         _errorMessage = 'No hay conexión a Internet. Por favor, verifica tu conexión.';
         _isConnectionGood = false;
+        if (_audioPlayer.playerState.playing) {
+          _audioPlayer.stop(); // Detener la reproducción si no hay conexión
+        }
       });
     } else {
       setState(() {
@@ -418,10 +425,11 @@ class _RadioHomeState extends State<RadioHome> with WidgetsBindingObserver {
           child: Column(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
-              LoadingAnimationWidget.inkDrop( // Loader InkDrop
-                color: Colors.blue,
-                size: 50.0,
-              ),
+              SizedBox(
+                width: 50,
+                height: 50,
+                child: CircularProgressIndicator(valueColor: AlwaysStoppedAnimation<Color>(_isDarkMode ? Colors.white : Colors.blue)),
+              )
             ],
           ),
         ),
@@ -478,8 +486,7 @@ class _RadioHomeState extends State<RadioHome> with WidgetsBindingObserver {
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
                 const Text(
-                  'A Voz da Cura Divina',
-                  style: TextStyle(fontSize: 24, fontWeight: FontWeight.w300),
+                  'A Voz da Cura Divina', style: TextStyle(color: Colors.black, fontSize: 24, fontWeight: FontWeight.w300),
                 ),
                 const SizedBox(height: 10),
                 const CircleAvatar(
@@ -528,14 +535,27 @@ class _RadioHomeState extends State<RadioHome> with WidgetsBindingObserver {
                               ],
                             ),
                           ),
-                          FloatingActionButton(
-                            onPressed: _playOrStopStream,
-                            backgroundColor: Colors.transparent,
-                            elevation: 0,
-                            child: Icon(
-                              _audioPlayer.playerState.playing ? Icons.stop : Icons.play_arrow,
-                              color: _isDarkMode ? const Color(0xFF00FFFF) : Colors.black,
-                              size: 40,
+                          SizedBox( // Contenedor para el FloatingActionButton
+                            width: 76, // Ajusta el tamaño según sea necesario
+                            height: 76,
+                            child: Container(
+                              decoration: BoxDecoration(
+                                shape: BoxShape.circle,
+                                boxShadow: [
+                                  BoxShadow(
+                                    color: _isDarkMode ? Colors.transparent : const Color.fromARGB(255, 120, 163, 250).withOpacity(0.8),
+                                    offset: const Offset(0, 10),
+                                    blurRadius: 20,
+                                  ),
+                                ],
+                              ),
+                              child: FloatingActionButton(
+                                onPressed: _playOrStopStream,                                
+                                backgroundColor: _isDarkMode ? null : const Color.fromARGB(255, 255, 255, 255),
+                                foregroundColor: const Color(0xFF00FFFF), // Cian para el icono en modo oscuro
+                                child: Icon(_audioPlayer.playerState.playing ? Icons.stop : Icons.play_arrow, color: Colors.black, size: 52),
+                                shape: const CircleBorder(side: BorderSide(color: Color.fromARGB(255, 255, 255, 255), width: 1.5)),
+                              ),
                             ),
                           ),
                           Padding(
@@ -563,9 +583,13 @@ class _RadioHomeState extends State<RadioHome> with WidgetsBindingObserver {
                         ],
                       ),
                       SizedBox(height: _audioPlayer.playerState.playing ? 20 : 10),
-                      _audioPlayer.playerState.playing
-                          ? SizedBox(
-                              height: 20,
+                      !_audioPlayer.playerState.playing // Mostrar "Desligado" solo si no está reproduciendo
+                          ? Text(
+                              "Desligado", 
+                              style: TextStyle(color: _isDarkMode ? Colors.white : Colors.black),
+                            )
+                          : SizedBox( // Mostrar el carrusel solo si está reproduciendo
+                              height: 20, 
                               child: Marquee(
                                 text: "A Voz Da Cura Divina No Ar - Evangelizando o Mundo",
                                 style: TextStyle(color: _isDarkMode ? Colors.white : Colors.black),
@@ -580,11 +604,7 @@ class _RadioHomeState extends State<RadioHome> with WidgetsBindingObserver {
                                 decelerationDuration: const Duration(milliseconds: 500),
                                 decelerationCurve: Curves.easeOut,
                               ),
-                            )
-                          : Text(
-                              "Desligado",
-                              style: TextStyle(color: _isDarkMode ? Colors.white : Colors.black),
-                            ),
+                            ),                      
                       const SizedBox(height: 10),
                       Row(
                         mainAxisAlignment: MainAxisAlignment.center,
@@ -600,7 +620,7 @@ class _RadioHomeState extends State<RadioHome> with WidgetsBindingObserver {
                               });
                             },
                             activeColor: _isDarkMode ? const Color(0xFF00FFFF) : Colors.black,
-                            inactiveColor: _isDarkMode ? Colors.grey : Colors.grey[300],
+                            inactiveColor: _isDarkMode ? const Color.fromARGB(255, 158, 158, 158) : Colors.grey[300],
                           ),
                         ],
                       ),
@@ -622,30 +642,6 @@ class _RadioHomeState extends State<RadioHome> with WidgetsBindingObserver {
               ],
             ),
           ),
-          if (_isLoading) // Mostrar inkDrop solo si _isLoading es true
-            Positioned(
-              bottom: 20,
-              left: 0,
-              right: 0,
-              child: Center(
-                child: LoadingAnimationWidget.inkDrop(
-                  color: Colors.blue,
-                  size: 50.0,
-                ),
-              ),
-            ),
-          if (!_isLoading && _audioPlayer.playerState.playing) // Mostrar Ripple solo si NO está cargando y está reproduciendo
-            Positioned(
-              bottom: 20,
-              left: 0,
-              right: 0,
-              child: Center(
-                child: SpinKitRipple(
-                  color: Colors.blue,
-                  size: 100.0,
-                ),
-              ),
-            ),
         ],
       ),
     );
